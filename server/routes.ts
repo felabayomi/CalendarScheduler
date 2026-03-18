@@ -1,54 +1,186 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertAppointmentSchema } from "@shared/schema";
+import { insertAvailabilitySchema, insertBookingSchema } from "@shared/schema";
 import { z } from "zod";
+import { randomUUID } from "crypto";
+
+// In-memory token store for admin sessions
+const activeSessions = new Map<string, number>(); // token -> userId
+
+function generateMeetingLink(): string {
+  const id = randomUUID().split("-")[0];
+  return `https://meet.jit.si/booking-${id}`;
+}
+
+function generateTimeSlots(startTime: string, endTime: string, duration: number): string[] {
+  const slots: string[] = [];
+  const [startH, startM] = startTime.split(":").map(Number);
+  const [endH, endM] = endTime.split(":").map(Number);
+  let current = startH * 60 + startM;
+  const end = endH * 60 + endM;
+  while (current + duration <= end) {
+    const h = Math.floor(current / 60).toString().padStart(2, "0");
+    const m = (current % 60).toString().padStart(2, "0");
+    slots.push(`${h}:${m}`);
+    current += duration;
+  }
+  return slots;
+}
+
+function getAdminId(req: any): number | null {
+  const auth = req.headers["authorization"];
+  if (!auth || !auth.startsWith("Bearer ")) return null;
+  const token = auth.slice(7);
+  return activeSessions.get(token) ?? null;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.get("/api/appointments", async (req, res) => {
-    // For demo purposes, use a fixed user ID
-    const userId = 1;
-    const appointments = await storage.getAppointments(userId);
-    res.json(appointments);
-  });
-
-  app.get("/api/appointments/:id", async (req, res) => {
-    const appointment = await storage.getAppointment(Number(req.params.id));
-    if (!appointment) {
-      return res.status(404).json({ message: "Appointment not found" });
+  // ─── Auth ────────────────────────────────────────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
+    const { username, password } = req.body;
+    const user = await storage.getUserByUsername(username);
+    if (!user || user.password !== password) {
+      return res.status(401).json({ message: "Invalid credentials" });
     }
-    res.json(appointment);
+    const token = randomUUID();
+    activeSessions.set(token, user.id);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, username: user.username } });
   });
 
-  app.post("/api/appointments", async (req, res) => {
+  app.post("/api/auth/logout", (req, res) => {
+    const auth = req.headers["authorization"];
+    if (auth?.startsWith("Bearer ")) {
+      activeSessions.delete(auth.slice(7));
+    }
+    res.json({ ok: true });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    const userId = getAdminId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const user = await storage.getUser(userId);
+    if (!user) return res.status(401).json({ message: "Unauthorized" });
+    res.json({ id: user.id, name: user.name, email: user.email, username: user.username });
+  });
+
+  // ─── Availability (admin only) ───────────────────────────────────────────
+  app.get("/api/availability", async (req, res) => {
+    // Public: returns availability for date (day of week) for slot calculations
+    // Also used by admin
+    const userId = 1; // main admin
+    const slots = await storage.getAvailability(userId);
+    res.json(slots);
+  });
+
+  app.post("/api/availability", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     try {
-      const userId = 1; // Fixed user ID for demo
-      const data = insertAppointmentSchema.parse(req.body);
-      const appointment = await storage.createAppointment(userId, data);
-      res.status(201).json(appointment);
+      const data = insertAvailabilitySchema.parse({ ...req.body, userId: adminId });
+      const slot = await storage.createAvailability(data);
+      res.status(201).json(slot);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid appointment data", errors: error.errors });
-      }
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid data", errors: error.errors });
       throw error;
     }
   });
 
-  app.patch("/api/appointments/:id", async (req, res) => {
+  app.patch("/api/availability/:id", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     try {
-      const data = insertAppointmentSchema.partial().parse(req.body);
-      const appointment = await storage.updateAppointment(Number(req.params.id), data);
-      res.json(appointment);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid appointment data", errors: error.errors });
+      const slot = await storage.updateAvailability(Number(req.params.id), req.body);
+      res.json(slot);
+    } catch (e: any) {
+      res.status(404).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/availability/:id", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
+    await storage.deleteAvailability(Number(req.params.id));
+    res.status(204).end();
+  });
+
+  // ─── Available time slots for a specific date (public) ──────────────────
+  app.get("/api/available-slots", async (req, res) => {
+    const date = req.query.date as string;
+    if (!date) return res.status(400).json({ message: "date required" });
+
+    const dayOfWeek = new Date(date + "T12:00:00").getDay();
+    const allAvailability = await storage.getAvailability(1);
+    const dayAvailability = allAvailability.filter(a => a.dayOfWeek === dayOfWeek && a.isActive);
+
+    if (dayAvailability.length === 0) return res.json([]);
+
+    const existingBookings = await storage.getBookingsByDate(date);
+    const bookedTimes = new Set(existingBookings.filter(b => b.status !== "cancelled").map(b => b.startTime));
+
+    const slots: string[] = [];
+    for (const avail of dayAvailability) {
+      const generated = generateTimeSlots(avail.startTime, avail.endTime, avail.slotDuration);
+      for (const slot of generated) {
+        if (!bookedTimes.has(slot) && !slots.includes(slot)) {
+          slots.push(slot);
+        }
       }
+    }
+
+    slots.sort();
+    res.json(slots);
+  });
+
+  // ─── Bookings ────────────────────────────────────────────────────────────
+  app.get("/api/bookings", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
+    const bookings = await storage.getAllBookings();
+    res.json(bookings);
+  });
+
+  app.get("/api/bookings/date/:date", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
+    const bookings = await storage.getBookingsByDate(req.params.date);
+    res.json(bookings);
+  });
+
+  app.post("/api/bookings", async (req, res) => {
+    try {
+      const data = insertBookingSchema.parse(req.body);
+
+      // Check slot is still available
+      const existing = await storage.getBookingsByDate(data.date);
+      const conflict = existing.find(b => b.startTime === data.startTime && b.status !== "cancelled");
+      if (conflict) return res.status(409).json({ message: "This time slot is no longer available" });
+
+      const meetingLink = data.meetingType === "video" ? generateMeetingLink() : null;
+      const booking = await storage.createBooking({ ...data, meetingLink: meetingLink ?? undefined, status: "confirmed" });
+      res.status(201).json(booking);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid booking data", errors: error.errors });
       throw error;
     }
   });
 
-  app.delete("/api/appointments/:id", async (req, res) => {
-    await storage.deleteAppointment(Number(req.params.id));
+  app.patch("/api/bookings/:id/status", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
+    const { status } = req.body;
+    try {
+      const booking = await storage.updateBookingStatus(Number(req.params.id), status);
+      res.json(booking);
+    } catch (e: any) {
+      res.status(404).json({ message: e.message });
+    }
+  });
+
+  app.delete("/api/bookings/:id", async (req, res) => {
+    const adminId = getAdminId(req);
+    if (!adminId) return res.status(401).json({ message: "Unauthorized" });
+    await storage.deleteBooking(Number(req.params.id));
     res.status(204).end();
   });
 
