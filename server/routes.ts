@@ -4,9 +4,17 @@ import { storage } from "./storage";
 import { insertAvailabilitySchema, insertBookingSchema } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import { getTwilioClient } from "./twilio";
 
 // In-memory token store for admin sessions
 const activeSessions = new Map<string, number>(); // token -> userId
+
+// In-memory OTP store: phone -> { code, expiresAt, verified }
+const otpStore = new Map<string, { code: string; expiresAt: number; verified: boolean }>();
+
+function generateOTP(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 function generateMeetingLink(): string {
   const id = randomUUID().split("-")[0];
@@ -62,6 +70,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const user = await storage.getUser(userId);
     if (!user) return res.status(401).json({ message: "Unauthorized" });
     res.json({ id: user.id, name: user.name, email: user.email, username: user.username });
+  });
+
+  // ─── Phone OTP Verification ──────────────────────────────────────────────
+  app.post("/api/verify/send", async (req, res) => {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ message: "Phone number required" });
+
+    const code = generateOTP();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    otpStore.set(phone, { code, expiresAt, verified: false });
+
+    try {
+      const client = await getTwilioClient();
+      await client.messages.create({
+        body: `Your verification code is: ${code}. It expires in 10 minutes.`,
+        messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+        to: phone,
+      });
+      res.json({ success: true, message: "Verification code sent" });
+    } catch (err: any) {
+      console.error("Twilio send error:", err.message);
+      res.status(500).json({ message: "Failed to send verification code. Please check your phone number." });
+    }
+  });
+
+  app.post("/api/verify/check", (req, res) => {
+    const { phone, code } = req.body;
+    if (!phone || !code) return res.status(400).json({ message: "Phone and code required" });
+
+    const entry = otpStore.get(phone);
+    if (!entry) return res.status(400).json({ message: "No verification code sent to this number" });
+    if (Date.now() > entry.expiresAt) {
+      otpStore.delete(phone);
+      return res.status(400).json({ message: "Code expired. Please request a new one." });
+    }
+    if (entry.code !== code) return res.status(400).json({ message: "Incorrect code. Please try again." });
+
+    entry.verified = true;
+    otpStore.set(phone, entry);
+    res.json({ success: true, message: "Phone verified!" });
   });
 
   // ─── Availability (admin only) ───────────────────────────────────────────
@@ -150,6 +198,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/bookings", async (req, res) => {
     try {
       const data = insertBookingSchema.parse(req.body);
+
+      // For phone call bookings, require phone verification
+      if (data.meetingType === "call") {
+        if (!data.clientPhone) {
+          return res.status(400).json({ message: "Phone number is required for phone call bookings" });
+        }
+        const otpEntry = otpStore.get(data.clientPhone);
+        if (!otpEntry || !otpEntry.verified) {
+          return res.status(400).json({ message: "Phone number must be verified before booking a call" });
+        }
+        // Clean up used OTP
+        otpStore.delete(data.clientPhone);
+      }
 
       // Check slot is still available
       const existing = await storage.getBookingsByDate(data.date);

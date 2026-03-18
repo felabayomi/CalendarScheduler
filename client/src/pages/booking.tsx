@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameMonth, isSameDay, isToday, isPast, startOfDay } from "date-fns";
-import { ChevronLeft, ChevronRight, Phone, Video, Clock, CheckCircle, Calendar } from "lucide-react";
+import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, getDay, isSameDay, isToday, isPast, startOfDay } from "date-fns";
+import { ChevronLeft, ChevronRight, Phone, Video, Clock, CheckCircle, Calendar, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +40,11 @@ export default function BookingPage() {
   const [booking, setBooking] = useState<any>(null);
   const [form, setForm] = useState({ clientName: "", clientEmail: "", clientPhone: "", notes: "" });
   const [phoneError, setPhoneError] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
 
   const { data: availability = [] } = useQuery<Availability[]>({
     queryKey: ["/api/availability"],
@@ -90,6 +95,59 @@ export default function BookingPage() {
     return digits.length >= 10 && digits.length <= 15;
   };
 
+  const handleSendOtp = async () => {
+    if (!form.clientPhone.trim()) {
+      setPhoneError("Please enter your phone number first.");
+      return;
+    }
+    if (!validatePhone(form.clientPhone)) {
+      setPhoneError("Please enter a valid phone number (e.g. +1 555 000 0000).");
+      return;
+    }
+    setPhoneError("");
+    setOtpError("");
+    setOtpLoading(true);
+    try {
+      const res = await fetch("/api/verify/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: form.clientPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setOtpSent(true);
+      toast({ title: "Code sent!", description: "Check your phone for the 6-digit verification code." });
+    } catch (err: any) {
+      setPhoneError(err.message || "Failed to send code. Please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode || otpCode.length < 6) {
+      setOtpError("Please enter the 6-digit code.");
+      return;
+    }
+    setOtpLoading(true);
+    setOtpError("");
+    try {
+      const res = await fetch("/api/verify/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: form.clientPhone, code: otpCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setPhoneVerified(true);
+      toast({ title: "Phone verified!", description: "Your number has been confirmed." });
+    } catch (err: any) {
+      setOtpError(err.message || "Verification failed. Please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDate || !selectedSlot) return;
@@ -101,6 +159,10 @@ export default function BookingPage() {
       }
       if (!validatePhone(form.clientPhone)) {
         setPhoneError("Please enter a valid phone number (e.g. +1 555 000 0000).");
+        return;
+      }
+      if (!phoneVerified) {
+        setPhoneError("Please verify your phone number before confirming.");
         return;
       }
     } else if (form.clientPhone.trim() && !validatePhone(form.clientPhone)) {
@@ -359,17 +421,65 @@ export default function BookingPage() {
                       <Label>
                         Phone number {meetingType === "call" ? <span className="text-red-500">*</span> : <span className="text-gray-400">(optional)</span>}
                       </Label>
-                      <Input
-                        placeholder="+1 (555) 000-0000"
-                        required={meetingType === "call"}
-                        value={form.clientPhone}
-                        onChange={e => { setForm(f => ({ ...f, clientPhone: e.target.value })); setPhoneError(""); }}
-                        className={`mt-1 ${phoneError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
-                      />
+                      <div className="flex gap-2 mt-1">
+                        <Input
+                          placeholder="+1 (555) 000-0000"
+                          required={meetingType === "call"}
+                          value={form.clientPhone}
+                          disabled={phoneVerified}
+                          onChange={e => {
+                            setForm(f => ({ ...f, clientPhone: e.target.value }));
+                            setPhoneError("");
+                            setOtpSent(false);
+                            setPhoneVerified(false);
+                            setOtpCode("");
+                          }}
+                          className={`flex-1 ${phoneError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
+                        />
+                        {meetingType === "call" && !phoneVerified && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="shrink-0 text-blue-600 border-blue-300 hover:bg-blue-50"
+                            onClick={handleSendOtp}
+                            disabled={otpLoading}
+                          >
+                            {otpLoading && !otpSent ? "Sending..." : otpSent ? "Resend" : "Send code"}
+                          </Button>
+                        )}
+                        {phoneVerified && (
+                          <div className="flex items-center gap-1 text-green-600 text-sm font-medium shrink-0">
+                            <ShieldCheck className="w-4 h-4" /> Verified
+                          </div>
+                        )}
+                      </div>
                       {phoneError && <p className="text-xs text-red-500 mt-1">{phoneError}</p>}
-                      {meetingType === "call" && !phoneError && (
-                        <p className="text-xs text-gray-400 mt-1">Required so we can call you at the scheduled time.</p>
+                      {meetingType === "call" && !phoneVerified && !phoneError && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          {otpSent ? "Enter the 6-digit code sent to your phone." : "We'll send a verification code to confirm your number."}
+                        </p>
                       )}
+
+                      {meetingType === "call" && otpSent && !phoneVerified && (
+                        <div className="mt-3 flex gap-2">
+                          <Input
+                            placeholder="Enter 6-digit code"
+                            value={otpCode}
+                            maxLength={6}
+                            onChange={e => { setOtpCode(e.target.value.replace(/\D/g, "")); setOtpError(""); }}
+                            className={`flex-1 tracking-widest text-center font-mono ${otpError ? "border-red-400" : ""}`}
+                          />
+                          <Button
+                            type="button"
+                            className="shrink-0 bg-blue-600 hover:bg-blue-700"
+                            onClick={handleVerifyOtp}
+                            disabled={otpLoading}
+                          >
+                            {otpLoading ? "Verifying..." : "Verify"}
+                          </Button>
+                        </div>
+                      )}
+                      {otpError && <p className="text-xs text-red-500 mt-1">{otpError}</p>}
                     </div>
                     <div>
                       <Label>Notes <span className="text-red-500">*</span></Label>
