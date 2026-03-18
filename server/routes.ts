@@ -83,14 +83,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const client = getTwilioClient();
-      await client.messages.create({
+      const message = await client.messages.create({
         body: `Your verification code is: ${code}. It expires in 10 minutes.`,
         from: process.env.TWILIO_PHONE_NUMBER,
         to: phone,
       });
+      console.log(`Twilio message sent: SID=${message.sid} status=${message.status} to=${message.to} from=${message.from}`);
       res.json({ success: true, message: "Verification code sent" });
     } catch (err: any) {
-      console.error("Twilio send error:", err.message);
+      console.error("Twilio send error:", err.message, err.code, err.moreInfo);
       res.status(500).json({ message: "Failed to send verification code. Please check your phone number." });
     }
   });
