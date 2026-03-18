@@ -3,9 +3,10 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertAvailabilitySchema, insertBookingSchema } from "@shared/schema";
 import { z } from "zod";
-import { randomUUID } from "crypto";
 import { getTwilioClient } from "./twilio";
 import { getUncachableResendClient } from "./resend";
+import { createZoomMeeting } from "./zoom";
+import { syncToSmartCalendar } from "./smartcalendar";
 
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_EMAIL || "";
 
@@ -19,10 +20,6 @@ function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-function generateMeetingLink(): string {
-  const id = randomUUID().split("-")[0];
-  return `https://meet.jit.si/booking-${id}`;
-}
 
 function generateTimeSlots(startTime: string, endTime: string, duration: number): string[] {
   const slots: string[] = [];
@@ -228,8 +225,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const conflict = existing.find(b => b.startTime === data.startTime && b.status !== "cancelled");
       if (conflict) return res.status(409).json({ message: "This time slot is no longer available" });
 
-      const meetingLink = data.meetingType === "video" ? generateMeetingLink() : null;
+      // Generate Zoom meeting link for video bookings
+      let meetingLink: string | null = null;
+      if (data.meetingType === "video") {
+        try {
+          const startISO = new Date(`${data.date}T${data.startTime}:00`).toISOString();
+          const [sh, sm] = data.startTime.split(":").map(Number);
+          const [eh, em] = data.endTime.split(":").map(Number);
+          const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
+          meetingLink = await createZoomMeeting({
+            topic: `Meeting with ${data.clientName}`,
+            startTime: startISO,
+            durationMinutes,
+          });
+          console.log("Zoom meeting created:", meetingLink);
+        } catch (zoomErr: any) {
+          console.error("Zoom meeting creation failed:", zoomErr.message);
+        }
+      }
+
       const booking = await storage.createBooking({ ...data, meetingLink: meetingLink ?? undefined, status: "confirmed" });
+
+      // Sync to SmartCalendar
+      try {
+        const startISO = new Date(`${data.date}T${data.startTime}:00`).toISOString();
+        const endISO = new Date(`${data.date}T${data.endTime}:00`).toISOString();
+        await syncToSmartCalendar({
+          title: `Meeting with ${data.clientName}`,
+          startTime: startISO,
+          endTime: endISO,
+          location: data.meetingType === "video" ? "Zoom" : "Phone Call",
+          organizer: "Felix",
+          meetingUrl: meetingLink || "",
+          description: data.notes || "",
+        });
+      } catch (calErr: any) {
+        console.error("SmartCalendar sync failed:", calErr.message);
+      }
 
       // Send emails (admin notification + client confirmation)
       try {
