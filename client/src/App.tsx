@@ -24,10 +24,18 @@ function ProtectedRoute({ component: Component }: { component: () => JSX.Element
   return <Component />;
 }
 
+function RedirectTo({ to }: { to: string }) {
+  const [, navigate] = useLocation();
+  useEffect(() => { navigate(to); }, []);
+  return null;
+}
+
 function Router() {
   return (
     <Switch>
       <Route path="/" component={BookingPage} />
+      <Route path="/appointments">{() => <RedirectTo to="/" />}</Route>
+      <Route path="/calendar">{() => <RedirectTo to="/" />}</Route>
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin">
         {() => <ProtectedRoute component={AdminDashboard} />}
