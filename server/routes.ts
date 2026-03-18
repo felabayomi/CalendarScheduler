@@ -5,6 +5,9 @@ import { insertAvailabilitySchema, insertBookingSchema } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { getTwilioClient } from "./twilio";
+import { getUncachableResendClient } from "./resend";
+
+const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_EMAIL || "";
 
 // In-memory token store for admin sessions
 const activeSessions = new Map<string, number>(); // token -> userId
@@ -228,19 +231,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const meetingLink = data.meetingType === "video" ? generateMeetingLink() : null;
       const booking = await storage.createBooking({ ...data, meetingLink: meetingLink ?? undefined, status: "confirmed" });
 
-      // Notify admin via SMS
-      try {
-        const client = getTwilioClient();
-        const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
-        console.log("Sending admin SMS notification...");
-        const msg = await client.messages.create({
-          body: `New booking!\n${data.clientName}\n${typeLabel}\n${data.date} at ${data.startTime}\n${data.clientPhone || data.clientEmail}`,
-          from: process.env.TWILIO_PHONE_NUMBER,
-          to: "+12406642270",
-        });
-        console.log(`Admin SMS sent: SID=${msg.sid} status=${msg.status}`);
-      } catch (smsErr: any) {
-        console.error("Admin SMS notification failed:", smsErr.message, smsErr.code);
+      // Notify admin via email
+      if (ADMIN_NOTIFICATION_EMAIL) {
+        try {
+          const { client: resend, fromEmail } = await getUncachableResendClient();
+          const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
+          const result = await resend.emails.send({
+            from: fromEmail,
+            to: ADMIN_NOTIFICATION_EMAIL,
+            subject: `New Booking: ${data.clientName} — ${typeLabel}`,
+            html: `
+              <h2>New Booking Confirmed</h2>
+              <table style="border-collapse:collapse;font-family:sans-serif;font-size:15px;">
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Name</td><td><strong>${data.clientName}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Email</td><td>${data.clientEmail}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Phone</td><td>${data.clientPhone || "—"}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Type</td><td>${typeLabel}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Date</td><td>${data.date}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Notes</td><td>${data.notes || "—"}</td></tr>
+                ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}">${booking.meetingLink}</a></td></tr>` : ""}
+              </table>
+            `,
+          });
+          console.log("Admin email sent:", result);
+        } catch (emailErr: any) {
+          console.error("Admin email notification failed:", emailErr.message);
+        }
       }
 
       res.status(201).json(booking);
