@@ -39,6 +39,7 @@ export default function BookingPage() {
   const [step, setStep] = useState<"calendar" | "slots" | "form" | "done">("calendar");
   const [booking, setBooking] = useState<any>(null);
   const [form, setForm] = useState({ clientName: "", clientEmail: "", clientPhone: "", notes: "" });
+  const [phoneError, setPhoneError] = useState("");
 
   const { data: availability = [] } = useQuery<Availability[]>({
     queryKey: ["/api/availability"],
@@ -84,15 +85,36 @@ export default function BookingPage() {
     setStep("form");
   };
 
+  const validatePhone = (phone: string): boolean => {
+    const digits = phone.replace(/\D/g, "");
+    return digits.length >= 10 && digits.length <= 15;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDate || !selectedSlot) return;
+
+    if (meetingType === "call") {
+      if (!form.clientPhone.trim()) {
+        setPhoneError("Phone number is required for phone call bookings.");
+        return;
+      }
+      if (!validatePhone(form.clientPhone)) {
+        setPhoneError("Please enter a valid phone number (e.g. +1 555 000 0000).");
+        return;
+      }
+    } else if (form.clientPhone.trim() && !validatePhone(form.clientPhone)) {
+      setPhoneError("Please enter a valid phone number (e.g. +1 555 000 0000).");
+      return;
+    }
+
+    setPhoneError("");
     const endTime = addMinutes(selectedSlot, slotDuration);
     createBookingMutation.mutate({
       clientName: form.clientName,
       clientEmail: form.clientEmail,
       clientPhone: form.clientPhone || undefined,
-      notes: form.notes || undefined,
+      notes: form.notes,
       meetingType,
       date: format(selectedDate, "yyyy-MM-dd"),
       startTime: selectedSlot,
@@ -144,7 +166,7 @@ export default function BookingPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       {/* Header */}
       <header className="bg-white border-b shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center">
               <Calendar className="w-5 h-5 text-white" />
@@ -154,7 +176,6 @@ export default function BookingPage() {
               <p className="text-xs text-gray-500">Pick a time that works for you</p>
             </div>
           </div>
-          <a href="/admin/login" className="text-xs text-gray-400 hover:text-gray-600 transition">Admin →</a>
         </div>
       </header>
 
@@ -335,18 +356,26 @@ export default function BookingPage() {
                       />
                     </div>
                     <div>
-                      <Label>Phone number <span className="text-gray-400">(optional)</span></Label>
+                      <Label>
+                        Phone number {meetingType === "call" ? <span className="text-red-500">*</span> : <span className="text-gray-400">(optional)</span>}
+                      </Label>
                       <Input
                         placeholder="+1 (555) 000-0000"
+                        required={meetingType === "call"}
                         value={form.clientPhone}
-                        onChange={e => setForm(f => ({ ...f, clientPhone: e.target.value }))}
-                        className="mt-1"
+                        onChange={e => { setForm(f => ({ ...f, clientPhone: e.target.value })); setPhoneError(""); }}
+                        className={`mt-1 ${phoneError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
                       />
+                      {phoneError && <p className="text-xs text-red-500 mt-1">{phoneError}</p>}
+                      {meetingType === "call" && !phoneError && (
+                        <p className="text-xs text-gray-400 mt-1">Required so we can call you at the scheduled time.</p>
+                      )}
                     </div>
                     <div>
-                      <Label>Notes <span className="text-gray-400">(optional)</span></Label>
+                      <Label>Notes <span className="text-red-500">*</span></Label>
                       <Textarea
-                        placeholder="Anything you'd like us to know before the call?"
+                        required
+                        placeholder="What would you like to discuss? Please provide as much detail as possible."
                         value={form.notes}
                         onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
                         className="mt-1 resize-none"
