@@ -82,10 +82,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     otpStore.set(phone, { code, expiresAt, verified: false });
 
     try {
-      const client = await getTwilioClient();
+      const client = getTwilioClient();
       await client.messages.create({
         body: `Your verification code is: ${code}. It expires in 10 minutes.`,
-        messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+        from: process.env.TWILIO_PHONE_NUMBER,
         to: phone,
       });
       res.json({ success: true, message: "Verification code sent" });
