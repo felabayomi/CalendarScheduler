@@ -231,12 +231,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const meetingLink = data.meetingType === "video" ? generateMeetingLink() : null;
       const booking = await storage.createBooking({ ...data, meetingLink: meetingLink ?? undefined, status: "confirmed" });
 
-      // Notify admin via email
-      if (ADMIN_NOTIFICATION_EMAIL) {
-        try {
-          const { client: resend, fromEmail } = await getUncachableResendClient();
-          const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
-          const result = await resend.emails.send({
+      // Send emails (admin notification + client confirmation)
+      try {
+        const { client: resend, fromEmail } = await getUncachableResendClient();
+        const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
+
+        // Admin notification
+        if (ADMIN_NOTIFICATION_EMAIL) {
+          const adminResult = await resend.emails.send({
             from: fromEmail,
             to: ADMIN_NOTIFICATION_EMAIL,
             subject: `New Booking: ${data.clientName} — ${typeLabel}`,
@@ -254,10 +256,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
               </table>
             `,
           });
-          console.log("Admin email sent:", result);
-        } catch (emailErr: any) {
-          console.error("Admin email notification failed:", emailErr.message);
+          console.log("Admin email sent:", adminResult.data ? "OK" : adminResult.error?.message);
         }
+
+        // Client confirmation
+        const clientResult = await resend.emails.send({
+          from: fromEmail,
+          to: data.clientEmail,
+          subject: `Booking Confirmed — ${typeLabel} on ${data.date}`,
+          html: `
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+              <h2 style="color:#1d4ed8;">You're booked!</h2>
+              <p>Hi ${data.clientName}, your appointment has been confirmed.</p>
+              <table style="border-collapse:collapse;font-size:15px;width:100%;background:#f8fafc;border-radius:8px;padding:16px;">
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Type</td><td><strong>${typeLabel}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Date</td><td>${data.date}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
+                ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}" style="color:#1d4ed8;">${booking.meetingLink}</a></td></tr>` : ""}
+              </table>
+              ${booking.meetingLink ? `<a href="${booking.meetingLink}" style="display:inline-block;margin-top:20px;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
+              <p style="color:#888;font-size:13px;margin-top:24px;">We'll reach out if anything changes.</p>
+            </div>
+          `,
+        });
+        console.log("Client confirmation email sent:", clientResult.data ? "OK" : clientResult.error?.message);
+      } catch (emailErr: any) {
+        console.error("Email notification failed:", emailErr.message);
       }
 
       res.status(201).json(booking);

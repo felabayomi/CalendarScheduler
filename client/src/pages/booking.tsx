@@ -208,9 +208,17 @@ export default function BookingPage() {
                 <span className="capitalize">{booking.meetingType === "video" ? "Video Meeting" : "Phone Call"}</span>
               </div>
               {booking.meetingLink && (
-                <div className="text-sm">
-                  <p className="text-gray-500 mb-1">Meeting link:</p>
-                  <a href={booking.meetingLink} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all text-xs">{booking.meetingLink}</a>
+                <div className="pt-1">
+                  <a
+                    href={booking.meetingLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
+                  >
+                    <Video className="w-4 h-4" />
+                    Join Video Meeting
+                  </a>
+                  <p className="text-xs text-gray-400 mt-1.5 text-center break-all">{booking.meetingLink}</p>
                 </div>
               )}
             </div>
