@@ -227,6 +227,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const meetingLink = data.meetingType === "video" ? generateMeetingLink() : null;
       const booking = await storage.createBooking({ ...data, meetingLink: meetingLink ?? undefined, status: "confirmed" });
+
+      // Notify admin via SMS
+      try {
+        const client = getTwilioClient();
+        const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
+        await client.messages.create({
+          body: `New booking!\n${data.clientName}\n${typeLabel}\n${data.date} at ${data.startTime}\n${data.clientPhone || data.clientEmail}`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: "+12406642270",
+        });
+      } catch (smsErr: any) {
+        console.error("Admin SMS notification failed:", smsErr.message);
+      }
+
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid booking data", errors: error.errors });
