@@ -38,6 +38,6 @@ export async function getUncachableResendClient() {
   const { apiKey } = await getCredentials();
   return {
     client: new Resend(apiKey),
-    fromEmail: 'onboarding@resend.dev',
+    fromEmail: 'support@expeditionamerica.us',
   };
 }
