@@ -72,45 +72,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ id: user.id, name: user.name, email: user.email, username: user.username });
   });
 
-  // ─── Phone OTP Verification ──────────────────────────────────────────────
+  // ─── Phone OTP Verification (Twilio Verify) ─────────────────────────────
   app.post("/api/verify/send", async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ message: "Phone number required" });
 
-    const code = generateOTP();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-    otpStore.set(phone, { code, expiresAt, verified: false });
+    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+    if (!serviceSid) return res.status(500).json({ message: "Verification service not configured" });
 
     try {
       const client = getTwilioClient();
-      const message = await client.messages.create({
-        body: `Your verification code is: ${code}. It expires in 10 minutes.`,
-        from: process.env.TWILIO_PHONE_NUMBER,
+      const verification = await client.verify.v2.services(serviceSid).verifications.create({
         to: phone,
+        channel: "sms",
       });
-      console.log(`Twilio message sent: SID=${message.sid} status=${message.status} to=${message.to} from=${message.from}`);
+      console.log(`Twilio Verify sent: status=${verification.status} to=${verification.to}`);
       res.json({ success: true, message: "Verification code sent" });
     } catch (err: any) {
-      console.error("Twilio send error:", err.message, err.code, err.moreInfo);
+      console.error("Twilio Verify send error:", err.message, err.code);
       res.status(500).json({ message: "Failed to send verification code. Please check your phone number." });
     }
   });
 
-  app.post("/api/verify/check", (req, res) => {
+  app.post("/api/verify/check", async (req, res) => {
     const { phone, code } = req.body;
     if (!phone || !code) return res.status(400).json({ message: "Phone and code required" });
 
-    const entry = otpStore.get(phone);
-    if (!entry) return res.status(400).json({ message: "No verification code sent to this number" });
-    if (Date.now() > entry.expiresAt) {
-      otpStore.delete(phone);
-      return res.status(400).json({ message: "Code expired. Please request a new one." });
-    }
-    if (entry.code !== code) return res.status(400).json({ message: "Incorrect code. Please try again." });
+    const serviceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+    if (!serviceSid) return res.status(500).json({ message: "Verification service not configured" });
 
-    entry.verified = true;
-    otpStore.set(phone, entry);
-    res.json({ success: true, message: "Phone verified!" });
+    try {
+      const client = getTwilioClient();
+      const check = await client.verify.v2.services(serviceSid).verificationChecks.create({
+        to: phone,
+        code,
+      });
+      console.log(`Twilio Verify check: status=${check.status} to=${check.to}`);
+      if (check.status === "approved") {
+        // Mark as verified in our store so booking endpoint can confirm
+        otpStore.set(phone, { code, expiresAt: Date.now() + 10 * 60 * 1000, verified: true });
+        res.json({ success: true, message: "Phone verified!" });
+      } else {
+        res.status(400).json({ message: "Incorrect code. Please try again." });
+      }
+    } catch (err: any) {
+      console.error("Twilio Verify check error:", err.message, err.code);
+      res.status(400).json({ message: "Incorrect or expired code. Please try again." });
+    }
   });
 
   // ─── Availability (admin only) ───────────────────────────────────────────
