@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, isToday, isFuture, startOfDay } from "date-fns";
 import { Calendar, Phone, Video, Clock, Users, CheckCircle, XCircle, Trash2, Settings, LogOut, Plus, ChevronDown, ChevronUp } from "lucide-react";
@@ -39,6 +39,7 @@ export default function AdminDashboard() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const qc = useQueryClient();
+  const prevBookingCount = useRef<number | null>(null);
 
   const fetchWithAuth = (url: string) =>
     fetch(url, { headers: getAuthHeader(token) }).then(r => r.json());
@@ -46,7 +47,26 @@ export default function AdminDashboard() {
   const { data: bookings = [], isLoading: bookingsLoading } = useQuery<Booking[]>({
     queryKey: ["/api/bookings"],
     queryFn: () => fetchWithAuth("/api/bookings"),
+    refetchInterval: 20000,
   });
+
+  useEffect(() => {
+    if (prevBookingCount.current === null) {
+      prevBookingCount.current = bookings.length;
+      return;
+    }
+    if (bookings.length > prevBookingCount.current) {
+      const newest = bookings[bookings.length - 1];
+      toast({
+        title: "New booking!",
+        description: newest
+          ? `${newest.clientName} — ${newest.meetingType === "call" ? "Phone Call" : "Video Meeting"} on ${newest.date} at ${newest.startTime}`
+          : "A new appointment has been booked.",
+        duration: 8000,
+      });
+    }
+    prevBookingCount.current = bookings.length;
+  }, [bookings.length]);
 
   const { data: availability = [], isLoading: availabilityLoading } = useQuery<Availability[]>({
     queryKey: ["/api/availability"],

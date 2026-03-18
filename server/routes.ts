@@ -232,13 +232,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const client = getTwilioClient();
         const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
-        await client.messages.create({
+        console.log("Sending admin SMS notification...");
+        const msg = await client.messages.create({
           body: `New booking!\n${data.clientName}\n${typeLabel}\n${data.date} at ${data.startTime}\n${data.clientPhone || data.clientEmail}`,
           from: process.env.TWILIO_PHONE_NUMBER,
           to: "+12406642270",
         });
+        console.log(`Admin SMS sent: SID=${msg.sid} status=${msg.status}`);
       } catch (smsErr: any) {
-        console.error("Admin SMS notification failed:", smsErr.message);
+        console.error("Admin SMS notification failed:", smsErr.message, smsErr.code);
       }
 
       res.status(201).json(booking);
