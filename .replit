@@ -42,7 +42,7 @@ waitForPort = 5000
 
 [agent]
 expertMode = true
-integrations = ["twilio:1.0.0"]
+integrations = ["twilio:1.0.0", "resend:1.0.0"]
 
 [userenv]
 
