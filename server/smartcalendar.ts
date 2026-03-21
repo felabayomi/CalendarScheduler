@@ -1,4 +1,4 @@
-const WEBHOOK_URL = "https://smartmeetings.felixconsult.co/api/webhook/booking";
+const WEBHOOK_URL = "https://smartmeetings.felixconsult.co/admin/ark/felixdgreat";
 const FALLBACK_URL = "https://smartmeetings.felixconsult.co/api/meetings";
 
 export async function syncToSmartCalendar(params: {
@@ -38,17 +38,15 @@ export async function syncToSmartCalendar(params: {
     });
 
     if (res.ok) {
-      const result = await res.json();
-      console.log("Synced to SmartMeetings (webhook):", result?.id || "OK");
+      console.log("Synced to SmartMeetings (webhook): OK");
       return;
     }
 
     const err = await res.text();
-    // If webhook not yet deployed, fall through to legacy endpoint
-    if (!err.includes("Cannot POST")) {
-      throw new Error(`SmartMeetings webhook failed: ${err}`);
+    console.warn("Webhook failed, falling back to legacy endpoint...", res.status);
+    if (!err.includes("Cannot POST") && res.status !== 404) {
+      throw new Error(`SmartMeetings webhook failed (${res.status}): ${err.slice(0, 200)}`);
     }
-    console.warn("Webhook not live yet, falling back to legacy endpoint...");
   }
 
   // Fallback: legacy /api/meetings endpoint (no auth required)
