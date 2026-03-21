@@ -259,6 +259,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           organizer: "Felix",
           meetingUrl: meetingLink || "",
           description: data.notes || "",
+          clientName: data.clientName,
+          clientEmail: data.clientEmail,
+          clientPhone: data.clientPhone || "",
         });
       } catch (calErr: any) {
         console.error("SmartCalendar sync failed:", calErr.message);
