@@ -278,7 +278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           booking.meetingLink ? `Join: ${booking.meetingLink}` : "",
         ].filter(Boolean).join("\n");
 
-        const SMART_CALENDAR_URL = "https://smartmeetings.felixconsult.co";
+        const SMART_CALENDAR_URL = "https://smartmeetings.felixconsult.co/admin/ark/felixdgreat";
 
         const icsContent = generateICS({
           uid: `booking-${booking.id}`,
