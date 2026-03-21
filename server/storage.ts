@@ -37,15 +37,15 @@ export class MemStorage implements IStorage {
     };
     this.users.set(admin.id, admin);
 
-    // Default availability: Mon-Fri 9am-5pm, 30-min slots
-    const defaultDays = [1, 2, 3, 4, 5]; // Mon-Fri
+    // Default availability: all 7 days, 24/7
+    const defaultDays = [0, 1, 2, 3, 4, 5, 6]; // Sun-Sat
     for (const day of defaultDays) {
       const slot: Availability = {
         id: this.currentAvailabilityId++,
         userId: admin.id,
         dayOfWeek: day,
-        startTime: "09:00",
-        endTime: "17:00",
+        startTime: "00:00",
+        endTime: "24:00",
         slotDuration: 30,
         isActive: true,
       };
