@@ -32,6 +32,7 @@ function addMinutes(time: string, mins: number): string {
 
 export default function BookingPage() {
   const { toast } = useToast();
+  const source = new URLSearchParams(window.location.search).get("ref") || undefined;
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -181,6 +182,7 @@ export default function BookingPage() {
       date: format(selectedDate, "yyyy-MM-dd"),
       startTime: selectedSlot,
       endTime,
+      source,
     });
   };
 

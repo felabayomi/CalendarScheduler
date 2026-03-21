@@ -411,6 +411,11 @@ function BookingSection({ title, bookings, isLoading, onCancel, onDelete, onRest
                           Join video meeting →
                         </a>
                       )}
+                      {b.source && (
+                        <span className="inline-block mt-1 text-xs bg-blue-50 text-blue-600 border border-blue-100 rounded px-2 py-0.5">
+                          via {b.source}
+                        </span>
+                      )}
                       {b.notes && <p className="text-xs text-gray-400 mt-1 italic">"{b.notes}"</p>}
                     </div>
                   </div>

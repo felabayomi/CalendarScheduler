@@ -112,6 +112,7 @@ export class MemStorage implements IStorage {
       id,
       clientPhone: data.clientPhone ?? null,
       notes: data.notes ?? null,
+      source: data.source ?? null,
       meetingLink: data.meetingLink ?? null,
       status: data.status ?? "confirmed",
       createdAt: new Date(),

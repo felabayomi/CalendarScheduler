@@ -311,6 +311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   <tr><td style="padding:6px 16px 6px 0;color:#666">Date</td><td>${data.date}</td></tr>
                   <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
                   <tr><td style="padding:6px 16px 6px 0;color:#666">Notes</td><td>${data.notes || "—"}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Source</td><td>${data.source ? `<span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:4px;font-size:13px;">${data.source}</span>` : "—"}</td></tr>
                   ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}">${booking.meetingLink}</a></td></tr>` : ""}
                 </table>
                 <div style="margin-top:24px;">

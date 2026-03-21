@@ -30,6 +30,7 @@ export const bookings = pgTable("bookings", {
   startTime: text("start_time").notNull(), // "HH:MM"
   endTime: text("end_time").notNull(),     // "HH:MM"
   notes: text("notes"),
+  source: text("source"), // tracks which site/embed the booking came from (?ref=)
   status: text("status").notNull().default("confirmed"), // 'confirmed' | 'cancelled'
   meetingLink: text("meeting_link"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
