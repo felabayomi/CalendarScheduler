@@ -275,6 +275,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           booking.meetingLink ? `Join: ${booking.meetingLink}` : "",
         ].filter(Boolean).join("\n");
 
+        const SMART_CALENDAR_URL = "https://smartmeetings.felixconsult.co";
+
         const icsContent = generateICS({
           uid: `booking-${booking.id}`,
           title: `${typeLabel} with ${data.clientName}`,
@@ -308,7 +310,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   <tr><td style="padding:6px 16px 6px 0;color:#666">Notes</td><td>${data.notes || "—"}</td></tr>
                   ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}">${booking.meetingLink}</a></td></tr>` : ""}
                 </table>
-                <p style="margin-top:16px;color:#555;font-size:13px;">📎 Open the attached <strong>meeting.ics</strong> file to add this to your phone or computer calendar.</p>
+                <div style="margin-top:24px;">
+                  <a href="${SMART_CALENDAR_URL}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">View in SmartMeetings Calendar</a>
+                </div>
+                <p style="margin-top:12px;color:#888;font-size:12px;">This booking has been automatically added to your SmartMeetings calendar and is visible on all your devices.</p>
               </div>
             `,
             attachments: [icsAttachment],
@@ -332,8 +337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}" style="color:#1d4ed8;">${booking.meetingLink}</a></td></tr>` : ""}
               </table>
               ${booking.meetingLink ? `<a href="${booking.meetingLink}" style="display:inline-block;margin-top:20px;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
-              <p style="margin-top:16px;color:#555;font-size:13px;">📎 Open the attached <strong>meeting.ics</strong> file to save this appointment to your calendar.</p>
-              <p style="color:#888;font-size:13px;">We'll reach out if anything changes.</p>
+              <p style="color:#888;font-size:13px;margin-top:24px;">We'll reach out if anything changes.</p>
             </div>
           `,
           attachments: [icsAttachment],
