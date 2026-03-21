@@ -249,8 +249,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Sync to SmartCalendar
       try {
-        const startISO = new Date(`${data.date}T${data.startTime}:00`).toISOString();
-        const endISO = new Date(`${data.date}T${data.endTime}:00`).toISOString();
+        // Send date/time without UTC conversion so SmartMeetings shows the correct local date
+        const startISO = `${data.date}T${data.startTime}:00`;
+        const endISO = `${data.date}T${data.endTime}:00`;
         await syncToSmartCalendar({
           title: `Meeting with ${data.clientName}`,
           startTime: startISO,
