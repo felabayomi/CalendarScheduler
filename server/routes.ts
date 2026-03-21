@@ -340,7 +340,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
                 ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}" style="color:#1d4ed8;">${booking.meetingLink}</a></td></tr>` : ""}
               </table>
-              ${booking.meetingLink ? `<a href="${booking.meetingLink}" style="display:inline-block;margin-top:20px;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
+              <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;">
+                ${booking.meetingLink ? `<a href="${booking.meetingLink}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
+                <a href="${SMART_CALENDAR_URL}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">View in SmartMeetings</a>
+              </div>
               <p style="color:#888;font-size:13px;margin-top:24px;">We'll reach out if anything changes.</p>
             </div>
           `,
