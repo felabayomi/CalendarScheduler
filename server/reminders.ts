@@ -26,6 +26,8 @@ async function sendReminderEmail(params: {
     ? `${params.minutesBefore / 60} hour${params.minutesBefore > 60 ? "s" : ""}`
     : `${params.minutesBefore} minutes`;
 
+  const SMART_CALENDAR_URL = "https://smartmeetings.felixconsult.co/admin/ark/felixdgreat";
+
   await resend.emails.send({
     from: fromEmail,
     to: params.to,
@@ -39,7 +41,10 @@ async function sendReminderEmail(params: {
           <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${formatTime(params.startTime)} – ${formatTime(params.endTime)}</td></tr>
           ${params.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${params.meetingLink}" style="color:#1d4ed8;">${params.meetingLink}</a></td></tr>` : ""}
         </table>
-        ${params.meetingLink ? `<a href="${params.meetingLink}" style="display:inline-block;margin-top:20px;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
+        <div style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;">
+          ${params.meetingLink ? `<a href="${params.meetingLink}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
+          <a href="${SMART_CALENDAR_URL}" style="display:inline-block;background:#10b981;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">View in SmartMeetings</a>
+        </div>
       </div>
     `,
   });
