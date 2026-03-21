@@ -268,6 +268,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const { client: resend, fromEmail } = await getUncachableResendClient();
         const typeLabel = data.meetingType === "call" ? "Phone Call" : "Video Meeting";
+        const location = data.meetingType === "video" ? (booking.meetingLink || "Zoom") : "Phone Call";
+        const description = [
+          `${typeLabel} with ${data.clientName}`,
+          data.notes ? `Notes: ${data.notes}` : "",
+          booking.meetingLink ? `Join: ${booking.meetingLink}` : "",
+        ].filter(Boolean).join("\n");
+
+        const icsContent = generateICS({
+          uid: `booking-${booking.id}`,
+          title: `${typeLabel} with ${data.clientName}`,
+          description,
+          date: data.date,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          location,
+        });
+        const icsAttachment = {
+          filename: "meeting.ics",
+          content: Buffer.from(icsContent).toString("base64"),
+        };
 
         // Admin notification
         if (ADMIN_NOTIFICATION_EMAIL) {
@@ -276,18 +296,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             to: ADMIN_NOTIFICATION_EMAIL,
             subject: `New Booking: ${data.clientName} — ${typeLabel}`,
             html: `
-              <h2>New Booking Confirmed</h2>
-              <table style="border-collapse:collapse;font-family:sans-serif;font-size:15px;">
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Name</td><td><strong>${data.clientName}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Email</td><td>${data.clientEmail}</td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Phone</td><td>${data.clientPhone || "—"}</td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Type</td><td>${typeLabel}</td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Date</td><td>${data.date}</td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#666">Notes</td><td>${data.notes || "—"}</td></tr>
-                ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}">${booking.meetingLink}</a></td></tr>` : ""}
-              </table>
+              <div style="font-family:sans-serif;max-width:520px;">
+                <h2 style="color:#1d4ed8;">New Booking Confirmed</h2>
+                <table style="border-collapse:collapse;font-size:15px;">
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Name</td><td><strong>${data.clientName}</strong></td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Email</td><td>${data.clientEmail}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Phone</td><td>${data.clientPhone || "—"}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Type</td><td>${typeLabel}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Date</td><td>${data.date}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Time</td><td>${data.startTime} – ${data.endTime}</td></tr>
+                  <tr><td style="padding:6px 16px 6px 0;color:#666">Notes</td><td>${data.notes || "—"}</td></tr>
+                  ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}">${booking.meetingLink}</a></td></tr>` : ""}
+                </table>
+                <p style="margin-top:16px;color:#555;font-size:13px;">📎 Open the attached <strong>meeting.ics</strong> file to add this to your phone or computer calendar.</p>
+              </div>
             `,
+            attachments: [icsAttachment],
           });
           console.log("Admin email sent:", adminResult.data ? "OK" : adminResult.error?.message);
         }
@@ -308,9 +332,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 ${booking.meetingLink ? `<tr><td style="padding:6px 16px 6px 0;color:#666">Meeting Link</td><td><a href="${booking.meetingLink}" style="color:#1d4ed8;">${booking.meetingLink}</a></td></tr>` : ""}
               </table>
               ${booking.meetingLink ? `<a href="${booking.meetingLink}" style="display:inline-block;margin-top:20px;background:#1d4ed8;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;">Join Video Meeting</a>` : ""}
-              <p style="color:#888;font-size:13px;margin-top:24px;">We'll reach out if anything changes.</p>
+              <p style="margin-top:16px;color:#555;font-size:13px;">📎 Open the attached <strong>meeting.ics</strong> file to save this appointment to your calendar.</p>
+              <p style="color:#888;font-size:13px;">We'll reach out if anything changes.</p>
             </div>
           `,
+          attachments: [icsAttachment],
         });
         console.log("Client confirmation email sent:", clientResult.data ? "OK" : clientResult.error?.message);
       } catch (emailErr: any) {
