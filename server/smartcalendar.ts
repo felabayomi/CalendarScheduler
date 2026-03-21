@@ -1,4 +1,4 @@
-const WEBHOOK_URL = "https://smartmeetings.felixconsult.co/admin/ark/felixdgreat";
+const WEBHOOK_URL = "https://smartmeetings.felixconsult.co/api/webhook/booking";
 const FALLBACK_URL = "https://smartmeetings.felixconsult.co/api/meetings";
 
 export async function syncToSmartCalendar(params: {
