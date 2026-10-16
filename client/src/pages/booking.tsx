@@ -47,11 +47,23 @@ export default function BookingPage() {
   const [phoneVerified, setPhoneVerified] = useState(false);
   const [otpLoading, setOtpLoading] = useState(false);
 
-  const { data: availability = [] } = useQuery<Availability[]>({
+  const fallbackAvailability: Availability[] = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
+    id: dayOfWeek + 1,
+    userId: 1,
+    dayOfWeek,
+    startTime: "09:00",
+    endTime: "17:00",
+    slotDuration: 30,
+    isActive: true,
+  }));
+
+  const { data: availability = fallbackAvailability } = useQuery<Availability[]>({
     queryKey: ["/api/availability"],
+    retry: false,
   });
 
-  const activeDays = new Set(availability.filter(a => a.isActive).map(a => a.dayOfWeek));
+  const availabilityData = availability.length > 0 ? availability : fallbackAvailability;
+  const activeDays = new Set(availabilityData.filter(a => a.isActive).map(a => a.dayOfWeek));
 
   const dateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : "";
   const { data: slots = [], isLoading: slotsLoading } = useQuery<string[]>({
@@ -60,7 +72,7 @@ export default function BookingPage() {
     enabled: !!dateStr,
   });
 
-  const slotDuration = availability[0]?.slotDuration ?? 30;
+  const slotDuration = availabilityData[0]?.slotDuration ?? 30;
 
   const createBookingMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/bookings", data),
