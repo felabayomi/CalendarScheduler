@@ -8,5 +8,9 @@ export default async function handler(req, res) {
     isInitialized = true;
   }
 
+  if (req.url === '/favicon.ico' && req.method === 'GET') {
+    return res.status(204).end();
+  }
+
   return app(req, res);
 }

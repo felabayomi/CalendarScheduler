@@ -1,5 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { apiRequest } from "@/lib/queryClient";
+﻿import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
 interface AuthUser {
   id: number;

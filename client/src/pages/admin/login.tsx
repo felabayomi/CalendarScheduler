@@ -27,7 +27,7 @@ export default function AdminLogin() {
       await login(form.username, form.password);
       navigate("/admin");
     } catch {
-      setError("Invalid username or password. Try admin / admin123");
+      setError("Invalid username or password.");
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,7 @@ export default function AdminLogin() {
               </Button>
             </form>
             <p className="text-xs text-center text-gray-400 mt-4">
-              Default credentials: admin / admin123
+              Use the configured administrator credentials for this deployment.
             </p>
           </CardContent>
         </Card>

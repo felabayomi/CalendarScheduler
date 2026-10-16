@@ -1,3 +1,5 @@
+import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -10,9 +12,7 @@ import { syncToSmartCalendar } from "./smartcalendar";
 import { generateICS, googleCalendarUrl } from "./calendar";
 
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_EMAIL || "";
-
-// In-memory token store for admin sessions
-const activeSessions = new Map<string, number>(); // token -> userId
+const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 
 // In-memory OTP store: phone -> { code, expiresAt, verified }
 const otpStore = new Map<string, { code: string; expiresAt: number; verified: boolean }>();
@@ -37,36 +37,68 @@ function generateTimeSlots(startTime: string, endTime: string, duration: number)
   return slots;
 }
 
-function getAdminId(req: any): number | null {
+async function getAdminId(req: any): Promise<number | null> {
   const auth = req.headers["authorization"];
-  if (!auth || !auth.startsWith("Bearer ")) return null;
-  const token = auth.slice(7);
-  return activeSessions.get(token) ?? null;
+  if (typeof auth !== "string") return null;
+  const trimmed = auth.trim();
+  if (!trimmed.toLowerCase().startsWith("bearer ")) return null;
+  const token = trimmed.slice(7).trim();
+  if (!token) return null;
+  return storage.validateAdminSession(token);
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Auth ────────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body;
-    const user = await storage.getUserByUsername(username);
-    if (!user || user.password !== password) {
+    const username = req.body?.username;
+    const password = req.body?.password;
+
+    if (typeof username !== "string" || typeof password !== "string") {
       return res.status(401).json({ message: "Invalid credentials" });
     }
+
+    const normalizedUsername = username.trim();
+    const normalizedPassword = password.trim();
+
+    if (!normalizedUsername || !normalizedPassword) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const user = await storage.getUserByUsername(normalizedUsername);
+
+    if (!user || typeof user.password !== "string") {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    let isValidPassword = false;
+    try {
+      isValidPassword = bcrypt.compareSync(normalizedPassword, user.password);
+    } catch {
+      isValidPassword = false;
+    }
+
+    if (!isValidPassword) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
     const token = randomUUID();
-    activeSessions.set(token, user.id);
+    await storage.createAdminSession(user.id, token, new Date(Date.now() + SESSION_TTL_MS));
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, username: user.username } });
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
     const auth = req.headers["authorization"];
-    if (auth?.startsWith("Bearer ")) {
-      activeSessions.delete(auth.slice(7));
+    if (typeof auth === "string") {
+      const trimmed = auth.trim();
+      if (trimmed.toLowerCase().startsWith("bearer ")) {
+        await storage.deleteAdminSession(trimmed.slice(7).trim());
+      }
     }
     res.json({ ok: true });
   });
 
   app.get("/api/auth/me", async (req, res) => {
-    const userId = getAdminId(req);
+    const userId = await getAdminId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const user = await storage.getUser(userId);
     if (!user) return res.status(401).json({ message: "Unauthorized" });
@@ -131,7 +163,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/availability", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     try {
       const data = insertAvailabilitySchema.parse({ ...req.body, userId: adminId });
@@ -144,7 +176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/availability/:id", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     try {
       const slot = await storage.updateAvailability(Number(req.params.id), req.body);
@@ -155,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.delete("/api/availability/:id", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     await storage.deleteAvailability(Number(req.params.id));
     res.status(204).end();
@@ -191,14 +223,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ─── Bookings ────────────────────────────────────────────────────────────
   app.get("/api/bookings", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     const bookings = await storage.getAllBookings();
     res.json(bookings);
   });
 
   app.get("/api/bookings/date/:date", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     const bookings = await storage.getBookingsByDate(req.params.date);
     res.json(bookings);
@@ -363,7 +395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.patch("/api/bookings/:id/status", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     const { status } = req.body;
     try {
@@ -375,7 +407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.delete("/api/bookings/:id", async (req, res) => {
-    const adminId = getAdminId(req);
+    const adminId = await getAdminId(req);
     if (!adminId) return res.status(401).json({ message: "Unauthorized" });
     await storage.deleteBooking(Number(req.params.id));
     res.status(204).end();

@@ -30,8 +30,12 @@ function formatTime(time: string): string {
   return `${hour}:${m.toString().padStart(2, "0")} ${period}`;
 }
 
-function getAuthHeader(token: string | null) {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+function getAuthHeader(token: string | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = "Bearer " + token;
+  }
+  return headers;
 }
 
 export default function AdminDashboard() {

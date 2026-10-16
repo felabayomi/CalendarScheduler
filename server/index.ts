@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import fs from "fs";
+import { createServer, type Server } from "http";
 import path, { dirname } from "path";
 import { fileURLToPath } from "url";
 import { registerRoutes } from "./routes";
@@ -54,51 +55,92 @@ app.use((req, res, next) => {
   next();
 });
 
+let isInitialized = false;
+let initializationPromise: Promise<typeof app> | null = null;
+let routesRegistered = false;
+let errorHandlerInstalled = false;
+let staticAssetsConfigured = false;
+let serverStarted = false;
+let server: ReturnType<typeof createServer> | null = null;
+
 export async function initializeApp() {
-  const server = await registerRoutes(app);
-  startReminderScheduler();
-
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
-  });
-
-  if (app.get("env") === "development") {
-    const { setupVite } = await import("./vite");
-    await setupVite(app, server);
-  } else {
-    const distPath = path.resolve(__dirname, "public");
-
-    if (!fs.existsSync(distPath)) {
-      throw new Error(`Could not find the build directory: ${distPath}`);
-    }
-
-    app.use(express.static(distPath));
-    app.use("*", (_req, res) => {
-      res.sendFile(path.resolve(distPath, "index.html"));
-    });
+  if (isInitialized) {
+    return app;
   }
 
-  if (!process.env.VERCEL) {
-    const port = Number(process.env.PORT || 5000);
-    const listenOptions: any = {
-      port,
-      host: "0.0.0.0",
-    };
-
-    if (process.platform !== "win32") {
-      listenOptions.reusePort = true;
-    }
-
-    server.listen(listenOptions, () => {
-      log(`serving on port ${port}`);
-    });
+  if (initializationPromise) {
+    return initializationPromise;
   }
 
-  return app;
+  initializationPromise = (async () => {
+    try {
+      if (!routesRegistered) {
+        server = await registerRoutes(app);
+        routesRegistered = true;
+      }
+
+      if (process.env.VERCEL !== "1" && process.env.NODE_ENV !== "production") {
+        startReminderScheduler();
+      }
+
+      if (!errorHandlerInstalled) {
+        app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+          const status = err.status || err.statusCode || 500;
+          const message = err.message || "Internal Server Error";
+          res.status(status).json({ message });
+        });
+        errorHandlerInstalled = true;
+      }
+
+      if (process.env.NODE_ENV === "development" && process.env.VERCEL !== "1") {
+        const { setupVite } = await import("./vite");
+        await setupVite(app, server!);
+        staticAssetsConfigured = true;
+      } else if (!staticAssetsConfigured) {
+        const distPath = path.resolve(__dirname, "public");
+
+        if (!fs.existsSync(distPath)) {
+          throw new Error(`Could not find the build directory: ${distPath}`);
+        }
+
+        app.use(express.static(distPath));
+        app.use("*", (_req, res) => {
+          res.sendFile(path.resolve(distPath, "index.html"));
+        });
+        staticAssetsConfigured = true;
+      }
+
+      if (!process.env.VERCEL && !serverStarted && server) {
+        const port = Number(process.env.PORT || 5000);
+        const listenOptions: any = {
+          port,
+          host: "0.0.0.0",
+        };
+
+        if (process.platform !== "win32") {
+          listenOptions.reusePort = true;
+        }
+
+        server.listen(listenOptions, () => {
+          log(`serving on port ${port}`);
+        });
+        serverStarted = true;
+      }
+
+      isInitialized = true;
+      return app;
+    } catch (error) {
+      if (routesRegistered) {
+        // Partial startup already attached middleware/routes; do not register them again on retry.
+        isInitialized = false;
+      }
+      throw error;
+    } finally {
+      initializationPromise = null;
+    }
+  })();
+
+  return initializationPromise;
 }
 
 if (!process.env.VERCEL) {
