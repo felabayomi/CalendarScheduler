@@ -44,6 +44,13 @@ export const adminSessions = pgTable("admin_sessions", {
   expiresAt: timestamp("expires_at").notNull(),
 });
 
+export const appMetadata = pgTable("app_metadata", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,

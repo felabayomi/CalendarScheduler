@@ -55,60 +55,71 @@ app.use((req, res, next) => {
 });
 
 let isInitialized = false;
+let initializationPromise: Promise<typeof app> | null = null;
 
 export async function initializeApp() {
   if (isInitialized) {
     return app;
   }
 
-  const server = await registerRoutes(app);
-
-  if (process.env.VERCEL !== "1" && process.env.NODE_ENV !== "production") {
-    startReminderScheduler();
+  if (initializationPromise) {
+    return initializationPromise;
   }
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  initializationPromise = (async () => {
+    const server = await registerRoutes(app);
 
-    res.status(status).json({ message });
-    throw err;
-  });
-
-  if (process.env.NODE_ENV === "development" && process.env.VERCEL !== "1") {
-    const { setupVite } = await import("./vite");
-    await setupVite(app, server);
-  } else {
-    const distPath = path.resolve(__dirname, "public");
-
-    if (!fs.existsSync(distPath)) {
-      throw new Error(`Could not find the build directory: ${distPath}`);
+    if (process.env.VERCEL !== "1" && process.env.NODE_ENV !== "production") {
+      startReminderScheduler();
     }
 
-    app.use(express.static(distPath));
-    app.use("*", (_req, res) => {
-      res.sendFile(path.resolve(distPath, "index.html"));
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+      res.status(status).json({ message });
     });
-  }
 
-  if (!process.env.VERCEL) {
-    const port = Number(process.env.PORT || 5000);
-    const listenOptions: any = {
-      port,
-      host: "0.0.0.0",
-    };
+    if (process.env.NODE_ENV === "development" && process.env.VERCEL !== "1") {
+      const { setupVite } = await import("./vite");
+      await setupVite(app, server);
+    } else {
+      const distPath = path.resolve(__dirname, "public");
 
-    if (process.platform !== "win32") {
-      listenOptions.reusePort = true;
+      if (!fs.existsSync(distPath)) {
+        throw new Error(`Could not find the build directory: ${distPath}`);
+      }
+
+      app.use(express.static(distPath));
+      app.use("*", (_req, res) => {
+        res.sendFile(path.resolve(distPath, "index.html"));
+      });
     }
 
-    server.listen(listenOptions, () => {
-      log(`serving on port ${port}`);
-    });
-  }
+    if (!process.env.VERCEL) {
+      const port = Number(process.env.PORT || 5000);
+      const listenOptions: any = {
+        port,
+        host: "0.0.0.0",
+      };
 
-  isInitialized = true;
-  return app;
+      if (process.platform !== "win32") {
+        listenOptions.reusePort = true;
+      }
+
+      server.listen(listenOptions, () => {
+        log(`serving on port ${port}`);
+      });
+    }
+
+    isInitialized = true;
+    return app;
+  })();
+
+  try {
+    return await initializationPromise;
+  } finally {
+    initializationPromise = null;
+  }
 }
 
 if (!process.env.VERCEL) {

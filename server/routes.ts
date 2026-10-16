@@ -39,8 +39,11 @@ function generateTimeSlots(startTime: string, endTime: string, duration: number)
 
 async function getAdminId(req: any): Promise<number | null> {
   const auth = req.headers["authorization"];
-  if (!auth || !auth.startsWith("Bearer ")) return null;
-  const token = auth.slice(7);
+  if (typeof auth !== "string") return null;
+  const trimmed = auth.trim();
+  if (!trimmed.toLowerCase().startsWith("bearer ")) return null;
+  const token = trimmed.slice(7).trim();
+  if (!token) return null;
   return storage.validateAdminSession(token);
 }
 
@@ -49,7 +52,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/login", async (req, res) => {
     const { username, password } = req.body;
     const user = await storage.getUserByUsername(username);
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+
+    if (!user) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    let isValidPassword = false;
+    try {
+      isValidPassword = bcrypt.compareSync(String(password), user.password);
+    } catch {
+      isValidPassword = false;
+    }
+
+    if (!isValidPassword) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -60,8 +75,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/logout", async (req, res) => {
     const auth = req.headers["authorization"];
-    if (auth?.startsWith("Bearer ")) {
-      await storage.deleteAdminSession(auth.slice(7));
+    if (typeof auth === "string") {
+      const trimmed = auth.trim();
+      if (trimmed.toLowerCase().startsWith("bearer ")) {
+        await storage.deleteAdminSession(trimmed.slice(7).trim());
+      }
     }
     res.json({ ok: true });
   });

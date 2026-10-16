@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import {
   adminSessions,
+  appMetadata,
   availability,
   bookings,
   type Availability,
@@ -195,6 +196,7 @@ export class PostgresStorage implements IStorage {
   private db: ReturnType<typeof drizzle>;
   private defaultAdminChecked = false;
   private initialized = false;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
     const connectionString = process.env.DATABASE_URL;
@@ -204,75 +206,111 @@ export class PostgresStorage implements IStorage {
 
     const pool = new Pool({
       connectionString,
-      ssl: process.env.VERCEL ? { rejectUnauthorized: false } : undefined,
+      ssl: {
+        rejectUnauthorized: true,
+      },
     });
 
     this.db = drizzle(pool, {
-      schema: { users, availability, bookings, adminSessions },
+      schema: { users, availability, bookings, adminSessions, appMetadata },
     });
   }
 
   private async initialize(): Promise<void> {
     if (this.initialized) return;
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.runInitialization();
+    }
+    await this.initializationPromise;
+  }
 
-    await this.db.execute(sql`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        username TEXT NOT NULL UNIQUE,
-        password TEXT NOT NULL,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL
-      );
-    `);
+  private async runInitialization(): Promise<void> {
+    try {
+      await this.db.execute(sql`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE,
+          password TEXT NOT NULL,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL
+        );
+      `);
 
-    await this.db.execute(sql`
-      CREATE TABLE IF NOT EXISTS availability (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        day_of_week INTEGER NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL,
-        slot_duration INTEGER NOT NULL DEFAULT 30,
-        is_active BOOLEAN NOT NULL DEFAULT true
-      );
-    `);
+      await this.db.execute(sql`
+        CREATE TABLE IF NOT EXISTS availability (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id),
+          day_of_week INTEGER NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          slot_duration INTEGER NOT NULL DEFAULT 30,
+          is_active BOOLEAN NOT NULL DEFAULT true
+        );
+      `);
 
-    await this.db.execute(sql`
-      CREATE TABLE IF NOT EXISTS bookings (
-        id SERIAL PRIMARY KEY,
-        client_name TEXT NOT NULL,
-        client_email TEXT NOT NULL,
-        client_phone TEXT,
-        meeting_type TEXT NOT NULL,
-        date TEXT NOT NULL,
-        start_time TEXT NOT NULL,
-        end_time TEXT NOT NULL,
-        notes TEXT,
-        source TEXT,
-        status TEXT NOT NULL DEFAULT 'confirmed',
-        meeting_link TEXT,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
-      );
-    `);
+      await this.db.execute(sql`
+        CREATE TABLE IF NOT EXISTS bookings (
+          id SERIAL PRIMARY KEY,
+          client_name TEXT NOT NULL,
+          client_email TEXT NOT NULL,
+          client_phone TEXT,
+          meeting_type TEXT NOT NULL,
+          date TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          notes TEXT,
+          source TEXT,
+          status TEXT NOT NULL DEFAULT 'confirmed',
+          meeting_link TEXT,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+      `);
 
-    await this.db.execute(sql`
-      CREATE TABLE IF NOT EXISTS admin_sessions (
-        id SERIAL PRIMARY KEY,
-        token TEXT NOT NULL UNIQUE,
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        expires_at TIMESTAMP NOT NULL
-      );
-    `);
+      await this.db.execute(sql`
+        CREATE TABLE IF NOT EXISTS admin_sessions (
+          id SERIAL PRIMARY KEY,
+          token TEXT NOT NULL UNIQUE,
+          user_id INTEGER NOT NULL REFERENCES users(id),
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          expires_at TIMESTAMP NOT NULL
+        );
+      `);
 
-    this.initialized = true;
-    await this.ensureDefaultAdmin();
+      await this.db.execute(sql`
+        CREATE TABLE IF NOT EXISTS app_metadata (
+          id SERIAL PRIMARY KEY,
+          key TEXT NOT NULL UNIQUE,
+          value TEXT NOT NULL,
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+      `);
+
+      await this.ensureDefaultAdmin();
+      this.initialized = true;
+    } catch (error) {
+      this.initialized = false;
+      throw error;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+
+  private async readAppMetadata(key: string): Promise<string | null> {
+    const rows = await this.db.select().from(appMetadata).where(eq(appMetadata.key, key)).limit(1);
+    return rows[0]?.value ?? null;
+  }
+
+  private async writeAppMetadata(key: string, value: string): Promise<void> {
+    await this.db.insert(appMetadata).values({ key, value }).onConflictDoUpdate({
+      target: appMetadata.key,
+      set: {
+        value,
+        updatedAt: new Date(),
+      },
+    });
   }
 
   private async ensureDefaultAdmin(): Promise<void> {
-    if (this.defaultAdminChecked) return;
-    this.defaultAdminChecked = true;
-
     const username = normalizeAdminValue(process.env.ADMIN_USERNAME);
     const password = normalizeAdminValue(process.env.ADMIN_PASSWORD);
     if (!username || !password) {
@@ -280,40 +318,56 @@ export class PostgresStorage implements IStorage {
       return;
     }
 
-    const existing = await this.getUserByUsername(username);
-    if (!existing) {
-      const user = await this.createUser({
-        username,
-        password,
-        name: "Admin",
-        email: "admin@example.com",
-      });
-      await this.db.insert(availability).values(
-        [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
-          userId: user.id,
-          dayOfWeek,
-          startTime: "00:00",
-          endTime: "24:00",
-          slotDuration: 30,
-          isActive: true,
-        }))
-      );
+    const existing = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
+    const adminUser = existing[0];
+
+    if (!adminUser) {
+      try {
+        const created = await this.db.insert(users).values({
+          username,
+          password: bcrypt.hashSync(normalizePassword(password), 12),
+          name: "Admin",
+          email: "admin@example.com",
+        }).returning();
+        await this.ensureWeeklyAvailability(created[0].id);
+        await this.writeAppMetadata("default_admin_seeded", username);
+        this.defaultAdminChecked = true;
+        return;
+      } catch (error: any) {
+        const message = String(error?.message ?? error);
+        if (!/duplicate|unique|already exists/i.test(message)) throw error;
+        const recovered = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
+        if (!recovered[0]) throw error;
+      }
+    }
+
+    this.defaultAdminChecked = true;
+    await this.ensureWeeklyAvailability(adminUser?.id ?? existing[0]?.id ?? 0);
+  }
+
+  private async ensureWeeklyAvailability(userId: number): Promise<void> {
+    if (!userId) return;
+    const seededValue = await this.readAppMetadata("default_availability_seeded");
+    if (seededValue === `user:${userId}`) return;
+
+    const currentAvailability = await this.db.select().from(availability).where(eq(availability.userId, userId)).limit(1);
+    if (currentAvailability.length > 0) {
+      await this.writeAppMetadata("default_availability_seeded", `user:${userId}`);
       return;
     }
 
-    const currentAvailability = await this.db.select().from(availability).where(eq(availability.userId, existing.id)).limit(1);
-    if (currentAvailability.length === 0) {
-      await this.db.insert(availability).values(
-        [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
-          userId: existing.id,
-          dayOfWeek,
-          startTime: "00:00",
-          endTime: "24:00",
-          slotDuration: 30,
-          isActive: true,
-        }))
-      );
-    }
+    await this.db.insert(availability).values(
+      [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
+        userId,
+        dayOfWeek,
+        startTime: "00:00",
+        endTime: "24:00",
+        slotDuration: 30,
+        isActive: true,
+      }))
+    ).onConflictDoNothing();
+
+    await this.writeAppMetadata("default_availability_seeded", `user:${userId}`);
   }
 
   async getUser(id: number): Promise<User | undefined> {
