@@ -1,7 +1,23 @@
 import express, { type Request, Response, NextFunction } from "express";
+import fs from "fs";
+import path, { dirname } from "path";
+import { fileURLToPath } from "url";
 import { registerRoutes } from "./routes";
 import { startReminderScheduler } from "./reminders";
-import { setupVite, serveStatic, log } from "./vite";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
 export const app = express();
 
@@ -51,9 +67,19 @@ export async function initializeApp() {
   });
 
   if (app.get("env") === "development") {
+    const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
-    serveStatic(app);
+    const distPath = path.resolve(__dirname, "public");
+
+    if (!fs.existsSync(distPath)) {
+      throw new Error(`Could not find the build directory: ${distPath}`);
+    }
+
+    app.use(express.static(distPath));
+    app.use("*", (_req, res) => {
+      res.sendFile(path.resolve(distPath, "index.html"));
+    });
   }
 
   if (!process.env.VERCEL) {
