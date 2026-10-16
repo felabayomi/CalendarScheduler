@@ -249,6 +249,11 @@ export class PostgresStorage implements IStorage {
       `);
 
       await this.db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS availability_user_day_unique
+        ON availability (user_id, day_of_week);
+      `);
+
+      await this.db.execute(sql`
         CREATE TABLE IF NOT EXISTS bookings (
           id SERIAL PRIMARY KEY,
           client_name TEXT NOT NULL,
@@ -318,8 +323,7 @@ export class PostgresStorage implements IStorage {
       return;
     }
 
-    const existing = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
-    const adminUser = existing[0];
+    let adminUser = (await this.db.select().from(users).where(eq(users.username, username)).limit(1))[0];
 
     if (!adminUser) {
       try {
@@ -329,35 +333,41 @@ export class PostgresStorage implements IStorage {
           name: "Admin",
           email: "admin@example.com",
         }).returning();
-        await this.ensureWeeklyAvailability(created[0].id);
-        await this.writeAppMetadata("default_admin_seeded", username);
-        this.defaultAdminChecked = true;
-        return;
+        adminUser = created[0];
       } catch (error: any) {
         const message = String(error?.message ?? error);
         if (!/duplicate|unique|already exists/i.test(message)) throw error;
         const recovered = await this.db.select().from(users).where(eq(users.username, username)).limit(1);
-        if (!recovered[0]) throw error;
+        adminUser = recovered[0];
+        if (!adminUser) throw error;
       }
     }
 
+    if (!adminUser) {
+      throw new Error(`Default admin user could not be resolved for username: ${username}`);
+    }
+
     this.defaultAdminChecked = true;
-    await this.ensureWeeklyAvailability(adminUser?.id ?? existing[0]?.id ?? 0);
+    await this.ensureWeeklyAvailability(adminUser.id);
+    await this.writeAppMetadata("default_admin_seeded", username);
   }
 
   private async ensureWeeklyAvailability(userId: number): Promise<void> {
     if (!userId) return;
     const seededValue = await this.readAppMetadata("default_availability_seeded");
-    if (seededValue === `user:${userId}`) return;
+    if (seededValue === `user:${userId}`) {
+      return;
+    }
 
-    const currentAvailability = await this.db.select().from(availability).where(eq(availability.userId, userId)).limit(1);
+    const currentAvailability = await this.db.select().from(availability).where(eq(availability.userId, userId));
     if (currentAvailability.length > 0) {
       await this.writeAppMetadata("default_availability_seeded", `user:${userId}`);
       return;
     }
 
+    const defaultDays = [0, 1, 2, 3, 4, 5, 6];
     await this.db.insert(availability).values(
-      [0, 1, 2, 3, 4, 5, 6].map(dayOfWeek => ({
+      defaultDays.map(dayOfWeek => ({
         userId,
         dayOfWeek,
         startTime: "00:00",
@@ -365,7 +375,9 @@ export class PostgresStorage implements IStorage {
         slotDuration: 30,
         isActive: true,
       }))
-    ).onConflictDoNothing();
+    ).onConflictDoNothing({
+      target: [availability.userId, availability.dayOfWeek],
+    });
 
     await this.writeAppMetadata("default_availability_seeded", `user:${userId}`);
   }

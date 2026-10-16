@@ -50,16 +50,29 @@ async function getAdminId(req: any): Promise<number | null> {
 export async function registerRoutes(app: Express): Promise<Server> {
   // ─── Auth ────────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body;
-    const user = await storage.getUserByUsername(username);
+    const username = req.body?.username;
+    const password = req.body?.password;
 
-    if (!user) {
+    if (typeof username !== "string" || typeof password !== "string") {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const normalizedUsername = username.trim();
+    const normalizedPassword = password.trim();
+
+    if (!normalizedUsername || !normalizedPassword) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const user = await storage.getUserByUsername(normalizedUsername);
+
+    if (!user || typeof user.password !== "string") {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     let isValidPassword = false;
     try {
-      isValidPassword = bcrypt.compareSync(String(password), user.password);
+      isValidPassword = bcrypt.compareSync(normalizedPassword, user.password);
     } catch {
       isValidPassword = false;
     }

@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { getUncachableResendClient } from "./resend";
 
 const sentReminders = new Set<string>();
+let reminderInterval: NodeJS.Timeout | undefined;
 
 function formatTime(time: string): string {
   const [h, m] = time.split(":").map(Number);
@@ -50,11 +51,22 @@ async function sendReminderEmail(params: {
   });
 }
 
+export function stopReminderScheduler() {
+  if (reminderInterval) {
+    clearInterval(reminderInterval);
+    reminderInterval = undefined;
+  }
+}
+
 export function startReminderScheduler() {
+  if (reminderInterval) {
+    return;
+  }
+
   const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
   const REMINDER_INTERVALS = [60, 15]; // minutes before appointment
 
-  setInterval(async () => {
+  reminderInterval = setInterval(async () => {
     try {
       const now = new Date();
       const bookings = await storage.getAllBookings();
