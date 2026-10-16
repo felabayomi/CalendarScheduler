@@ -36,6 +36,14 @@ export const bookings = pgTable("bookings", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const adminSessions = pgTable("admin_sessions", {
+  id: serial("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -47,9 +55,12 @@ export const insertAvailabilitySchema = createInsertSchema(availability).omit({ 
 
 export const insertBookingSchema = createInsertSchema(bookings).omit({ id: true, createdAt: true, meetingLink: true, status: true });
 
+export const insertAdminSessionSchema = createInsertSchema(adminSessions).omit({ id: true, createdAt: true });
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertAvailability = z.infer<typeof insertAvailabilitySchema>;
 export type Availability = typeof availability.$inferSelect;
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 export type Booking = typeof bookings.$inferSelect;
+export type AdminSession = typeof adminSessions.$inferSelect;

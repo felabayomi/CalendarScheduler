@@ -54,9 +54,18 @@ app.use((req, res, next) => {
   next();
 });
 
+let isInitialized = false;
+
 export async function initializeApp() {
+  if (isInitialized) {
+    return app;
+  }
+
   const server = await registerRoutes(app);
-  startReminderScheduler();
+
+  if (process.env.VERCEL !== "1" && process.env.NODE_ENV !== "production") {
+    startReminderScheduler();
+  }
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -66,7 +75,7 @@ export async function initializeApp() {
     throw err;
   });
 
-  if (app.get("env") === "development") {
+  if (process.env.NODE_ENV === "development" && process.env.VERCEL !== "1") {
     const { setupVite } = await import("./vite");
     await setupVite(app, server);
   } else {
@@ -98,6 +107,7 @@ export async function initializeApp() {
     });
   }
 
+  isInitialized = true;
   return app;
 }
 
